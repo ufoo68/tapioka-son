@@ -2,6 +2,7 @@
 
 const express = require('express');
 const line = require('@line/bot-sdk');
+const fetch = require('node-fetch');
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
@@ -12,6 +13,12 @@ const config = {
     channelAccessToken: process.env.ACCESS_TOKEN
 };
 
+function buildReplyText(text) {
+  return {
+    type: 'text',
+    text: text
+  }
+}
 const app = express();
 //URL + /webhookで登録したWebhook URLが呼び出されたときに実行される。
 app.post('/webhook', line.middleware(config), (req, res) => {
@@ -22,33 +29,41 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 
 const client = new line.Client(config);
 //ユーザから受け取ったイベントについてのハンドリングを実装する
-function handleEvent(event) {
-    let mes = '';
-    if (event.type !== 'things') {
-      return Promise.resolve(null);
-    }
-  
-    if(event.type === 'things' && event.things.type === 'link'){
-      mes = 'デバイスと接続しました。';
-    }else if(event.type === 'things' && event.things.type === 'unlink'){
-      mes = 'デバイスとの接続を解除しました。';
-    }else{
+async function handleEvent(event) {
+  switch (event.type) {
+    case 'things':
       const thingsData = event.things.result;    
-      if (!thingsData.bleNotificationPayload) return
-      // bleNotificationPayloadにデータが来る
       const blePayload = thingsData.bleNotificationPayload;
       const buffer = new Buffer.from(blePayload, 'base64');
-      const data = buffer.toString('hex');  //Base64をデコード
-      console.log("Payload=" + parseInt(data,16));
-      mes = `${parseInt(data,16)}歩あるいたよ`;
-      const msgObj = {
-        type: 'text',
-        text: mes //実際に返信の言葉を入れる箇所
+      const data = parseInt(buffer.toString('hex'), 16);
+      console.log("Payload=" + data);
+      fetch(`https://f2ea0e8e.ngrok.io/postTapioka`, {
+        method: "POST",
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({step: data})
+      })
+      return client.replyMessage(event.replyToken, buildReplyText('今日の歩数をカウントしたよ'));
+    case 'message':
+      if (event.message.text == '今日のタピオカ') {
+        const res = await fetch(`https://f2ea0e8e.ngrok.io/getTapioka`);
+        const data = await res.json();
+        console.log(data)
+        if(data.step > 200) {
+          return client.replyMessage(event.replyToken, buildReplyText('タピオカバナナミルクを飲みましょう'));
+        } else if(data.step > 150) {
+          return client.replyMessage(event.replyToken, buildReplyText('タピオカイチゴミルクを飲みましょう'));
+        } else if(data.step > 100) {
+          return client.replyMessage(event.replyToken, buildReplyText('タピオカミルクティーを飲みましょう'));
+        }
+        return client.replyMessage(event.replyToken, buildReplyText('麦茶を飲みましょう'));
       }
-  
-      return client.replyMessage(event.replyToken, msgObj);
-    }
+    default:
+      return Promise.resolve(null);
   }
+}
 
 app.listen(PORT);
 console.log(`Server running at ${PORT}`);
